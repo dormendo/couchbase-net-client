@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Sockets;
 using System.Threading;
 using Couchbase.IO.Converters;
@@ -19,25 +19,27 @@ namespace Couchbase.IO
         {
             Func<IConnectionPool<T>, IByteConverter, BufferAllocator, T> factory = (p, c, b) =>
             {
-
                 var socket = new Socket(p.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
-                var waitHandle = new ManualResetEvent(false);
                 var asyncEventArgs = new SocketAsyncEventArgs
                 {
                     RemoteEndPoint = p.EndPoint
                 };
-                asyncEventArgs.Completed += delegate { waitHandle.Set(); };
 
-                if (socket.ConnectAsync(asyncEventArgs))
+                using (var waitHandle = new ManualResetEvent(false))
                 {
-                    // True means the connect command is running asynchronously, so we need to wait for completion
+                    asyncEventArgs.Completed += delegate { waitHandle.Set(); };
 
-                    if (!waitHandle.WaitOne(p.Configuration.ConnectTimeout))
+                    if (socket.ConnectAsync(asyncEventArgs))
                     {
-                        socket.Dispose();
-                        const int connectionTimedOut = 10060;
-                        throw new SocketException(connectionTimedOut);
+                        // True means the connect command is running asynchronously, so we need to wait for completion
+
+                        if (!waitHandle.WaitOne(p.Configuration.ConnectTimeout))
+                        {
+                            socket.Dispose();
+                            const int connectionTimedOut = 10060;
+                            throw new SocketException(connectionTimedOut);
+                        }
                     }
                 }
 
