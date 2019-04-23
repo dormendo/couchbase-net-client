@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -20,7 +20,7 @@ namespace Couchbase.IO
         protected readonly Guid Identity = Guid.NewGuid();
         protected IByteConverter Converter;
         protected BufferAllocator BufferAllocator;
-        protected internal Func<IConnectionPool<T>, IByteConverter, BufferAllocator, T> Factory;
+        protected internal IConnectionFactory<T> Factory;
 
         //for log redaction
         private Func<object, string> User = RedactableArgument.UserAction;
@@ -31,7 +31,7 @@ namespace Couchbase.IO
         /// <param name="configuration">The configuration.</param>
         /// <param name="endPoint">The remote endpoint or server node to connect to.</param>
         protected ConnectionPoolBase(PoolConfiguration configuration, IPEndPoint endPoint)
-            : this(configuration, endPoint, DefaultConnectionFactory.GetGeneric<T>(), new DefaultConverter())
+            : this(configuration, endPoint, DefaultConnectionFactory<T>.Get(), new DefaultConverter())
         {
         }
 
@@ -42,7 +42,7 @@ namespace Couchbase.IO
         /// <param name="endPoint">The <see cref="IPEndPoint"/> of the Couchbase Server.</param>
         /// <param name="factory">A functory for creating <see cref="IConnection"/> objects./></param>
         /// <param name="converter">The <see cref="IByteConverter"/>that this instance is using.</param>
-        internal ConnectionPoolBase(PoolConfiguration configuration, IPEndPoint endPoint, Func<IConnectionPool<T>, IByteConverter, BufferAllocator, T> factory, IByteConverter converter)
+        internal ConnectionPoolBase(PoolConfiguration configuration, IPEndPoint endPoint, IConnectionFactory<T> factory, IByteConverter converter)
         {
             Configuration = configuration;
             Factory = factory;

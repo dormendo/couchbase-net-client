@@ -278,6 +278,8 @@ namespace Couchbase.IO
             if (Disposed) return;
             lock (_syncObj)
             {
+                if (Disposed)
+                    return;
                 Log.Info("Closing connection {0}", Identity);
                 Disposed = true;
                 IsDead = true;

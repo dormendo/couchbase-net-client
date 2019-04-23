@@ -2638,7 +2638,8 @@ namespace Couchbase
                 {
                     Log.Debug("Current bucket refCount# {0}", refCount.Count);
                     Interlocked.Decrement(ref refCount.Count);
-                    if (refCount.Count != 0) return refCount.Count;
+                    if (refCount.Count != 0)
+                        return refCount.Count;
                     Log.Debug("Removing bucket refCount# {0}", refCount.Count);
                     RefCounts.Remove(this);
                     Dispose(true);

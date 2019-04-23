@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Threading;
 using Couchbase.IO.Converters;
@@ -9,66 +10,133 @@ namespace Couchbase.IO
     /// <summary>
     /// A factory creator for <see cref="IConnection"/>s
     /// </summary>
-    public static class DefaultConnectionFactory
+    public class DefaultConnectionFactory<T> : IConnectionFactory<T> where T : class, IConnection
     {
+        public static DefaultConnectionFactory<T> Get()
+        {
+            return new DefaultConnectionFactory<T>();
+        }
+
+        private DefaultConnectionFactory()
+        {
+
+        }
+
+        private ConcurrentQueue<Item> _eaQueue = new ConcurrentQueue<Item>();
+
+        private class Item : IDisposable
+        {
+            public SocketAsyncEventArgs ea;
+
+            public ManualResetEventSlim waitHandle;
+
+            public Item()
+            {
+                this.ea = new SocketAsyncEventArgs();
+                this.waitHandle = new ManualResetEventSlim(false);
+                this.ea.UserToken = this.waitHandle;
+                this.ea.Completed += Ea_Completed;
+            }
+
+            private void Ea_Completed(object sender, SocketAsyncEventArgs e)
+            {
+                this.waitHandle.Set();
+            }
+
+            public void Reset()
+            {
+                this.waitHandle.Reset();
+            }
+
+            public void Dispose()
+            {
+                this.ea.Dispose();
+                this.waitHandle.Dispose();
+            }
+        }
+
+        private Item Acquire()
+        {
+            Item item;
+            if (_eaQueue.TryDequeue(out item))
+            {
+                return item;
+            }
+
+            return new Item();
+        }
+
+        private void Release(Item item)
+        {
+            item.Reset();
+            _eaQueue.Enqueue(item);
+        }
+
         /// <summary>
         /// Returns a functory for creating <see cref="Connection"/> objects.
         /// </summary>
         /// <returns>A <see cref="Connection"/> based off of the <see cref="PoolConfiguration"/> of the <see cref="IConnectionPool"/>.</returns>
-        internal static Func<IConnectionPool<T>, IByteConverter, BufferAllocator, T> GetGeneric<T>() where T : class, IConnection
+        public T Get(IConnectionPool<T> p, IByteConverter c, BufferAllocator b)
         {
-            Func<IConnectionPool<T>, IByteConverter, BufferAllocator, T> factory = (p, c, b) =>
+            var socket = new Socket(p.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+
+            Item item = null;
+            try
             {
-                var socket = new Socket(p.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                item = this.Acquire();
+                item.ea.RemoteEndPoint = p.EndPoint;
 
-                var asyncEventArgs = new SocketAsyncEventArgs
+                if (socket.ConnectAsync(item.ea))
                 {
-                    RemoteEndPoint = p.EndPoint
-                };
-
-                using (var waitHandle = new ManualResetEvent(false))
-                {
-                    asyncEventArgs.Completed += delegate { waitHandle.Set(); };
-
-                    if (socket.ConnectAsync(asyncEventArgs))
+                    if (!item.waitHandle.Wait(p.Configuration.ConnectTimeout))
                     {
-                        // True means the connect command is running asynchronously, so we need to wait for completion
-
-                        if (!waitHandle.WaitOne(p.Configuration.ConnectTimeout))
-                        {
-                            socket.Dispose();
-                            const int connectionTimedOut = 10060;
-                            throw new SocketException(connectionTimedOut);
-                        }
+                        socket.Dispose();
+                        const int connectionTimedOut = 10060;
+                        throw new SocketException(connectionTimedOut);
                     }
                 }
+            }
+            finally
+            {
+                if (item != null)
+                {
+                    this.Release(item);
+                }
+            }
 
-                if ((asyncEventArgs.SocketError != SocketError.Success) || !socket.Connected)
-                {
-                    socket.Dispose();
-                    throw new SocketException((int)asyncEventArgs.SocketError);
-                }
+            if ((item.ea.SocketError != SocketError.Success) || !socket.Connected)
+            {
+                socket.Dispose();
+                throw new SocketException((int)item.ea.SocketError);
+            }
 
-                IConnection connection;
-                if (p.Configuration.UseSsl)
-                {
-                    connection = new SslConnection(p, socket, c, b);
-                    connection.Authenticate();
-                }
-                else
-                {
-                    connection = Activator.CreateInstance(typeof (T), p, socket, c, b) as T;
-                }
-                //need to be able to completely disable the feature if false - this should work
-                if (p.Configuration.EnableTcpKeepAlives)
-                {
-                    socket.SetKeepAlives(p.Configuration.EnableTcpKeepAlives,
-                        p.Configuration.TcpKeepAliveTime,
-                        p.Configuration.TcpKeepAliveInterval);
-                }
-                return connection as T;
-            };
-            return factory;
+            IConnection connection;
+            if (p.Configuration.UseSsl)
+            {
+                connection = new SslConnection(p, socket, c, b);
+                connection.Authenticate();
+            }
+            else
+            {
+                connection = Activator.CreateInstance(typeof(T), p, socket, c, b) as T;
+            }
+            //need to be able to completely disable the feature if false - this should work
+            if (p.Configuration.EnableTcpKeepAlives)
+            {
+                socket.SetKeepAlives(p.Configuration.EnableTcpKeepAlives,
+                    p.Configuration.TcpKeepAliveTime,
+                    p.Configuration.TcpKeepAliveInterval);
+            }
+            return connection as T;
+        }
+
+        public void Dispose()
+        {
+            Item item;
+            while (_eaQueue.TryDequeue(out item))
+            {
+                item.Dispose();
+            }
         }
     }
 }

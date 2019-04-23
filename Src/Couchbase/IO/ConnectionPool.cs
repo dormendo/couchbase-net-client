@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,7 +31,7 @@ namespace Couchbase.IO
         /// <param name="configuration">The configuration.</param>
         /// <param name="endPoint">The remote endpoint or server node to connect to.</param>
         public ConnectionPool(PoolConfiguration configuration, IPEndPoint endPoint)
-            : base(configuration, endPoint, DefaultConnectionFactory.GetGeneric<T>(), new DefaultConverter())
+            : base(configuration, endPoint, DefaultConnectionFactory<T>.Get(), new DefaultConverter())
         {
         }
 
@@ -43,7 +43,7 @@ namespace Couchbase.IO
         /// <param name="factory">The factory.</param>
         /// <param name="converter">The converter.</param>
         internal ConnectionPool(PoolConfiguration configuration, IPEndPoint endPoint,
-           Func<IConnectionPool<T>, IByteConverter, BufferAllocator, T> factory, IByteConverter converter)
+           IConnectionFactory<T> factory, IByteConverter converter)
             : base(configuration, endPoint, factory, converter)
         {
         }
@@ -88,7 +88,7 @@ namespace Couchbase.IO
                 {
                     try
                     {
-                        var connection = Factory(this, Converter, BufferAllocator);
+                        var connection = Factory.Get(this, Converter, BufferAllocator);
 
                         Authenticate(connection);
                         EnableEnhancedAuthentication(connection);
@@ -141,7 +141,7 @@ namespace Couchbase.IO
                 if (_count < Configuration.MaxSize && !_disposed)
                 {
                     Log.Debug("Trying to acquire new connection! Refs={0}", _refs.Count);
-                    connection = Factory(this, Converter, BufferAllocator);
+                    connection = Factory.Get(this, Converter, BufferAllocator);
 
                     Authenticate(connection);
                     EnableEnhancedAuthentication(connection);
@@ -284,6 +284,8 @@ namespace Couchbase.IO
                         }
                     }
                 }
+
+                this.Factory.Dispose();
             }
         }
 
